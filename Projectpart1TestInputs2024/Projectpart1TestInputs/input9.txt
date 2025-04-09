@@ -1,0 +1,31 @@
+push 20
+debug
+push 10
+debug
+sub
+debug
+push " S c h r u t e "
+debug
+push K
+debug
+push "Dwight"
+debug
+push THE_OFFICE_
+push a
+push b
+swap
+toString
+println
+toString
+println
+toString
+println
+toString
+println
+toString
+println
+toString
+println
+toString
+println
+quit
