@@ -102,56 +102,61 @@ let interpreter (input, output) : unit =
         print_endline "+------------+"
     in
 
-    let print_env env =
+    (*let print_env env =
         let print_binding (name, value) =
             Printf.printf "%s -> %s\n" name (sv2str value)
         in
         print_endline "Environment:";
         List.iter print_binding env;
         print_endline "----------------"
-    in
+    in *)
 
-    let resolve_value v env =
+    
+    let rec resolve_value v env_stack =
         match v with
         | NAME n -> (
-            match List.assoc_opt n env with 
-            | Some value -> value 
-            | None -> ERROR)
-        
-        | _ -> v
-    in 
+            match env_stack with
+            | x :: xs -> (
+                match List.assoc_opt n x with
+                | Some value -> value
+                | None -> resolve_value v xs  (* keep passing NAME n *)
+              )
+            | [] -> ERROR
+          )
+    | _ -> v
+    in
     
     
-    let rec processor cl stack stack_stack env env_stack=
+    let rec processor cl stack stack_stack env env_stack =
     
         match (cl, stack) with  
         | (PUSH v :: rest, _) -> processor rest (v :: stack) stack_stack env env_stack
         | (ADD :: rest, v1 :: v2 :: restStack) -> (
-            match (resolve_value v1 env, resolve_value v2 env) with
+            match (resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack)) with
             | INT a, INT b -> processor rest (INT (a + b) :: restStack) stack_stack env  env_stack
             | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
           )        
         | (SUB :: rest, v1 :: v2 :: restStack) -> (
-            match resolve_value v1 env, resolve_value v2 env with
+            match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
             | INT a, INT b -> processor rest (INT (b - a) :: restStack) stack_stack env env_stack
             | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack)
     
         | MUL :: rest, v1 :: v2 :: restStack -> (
-            match resolve_value v1 env, resolve_value v2 env with
+            match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
             | INT a, INT b -> processor rest (INT (a * b) :: restStack) stack_stack env env_stack
             | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
           )
 
 
         | DIV :: rest, v1 :: v2 :: restStack -> (
-        match resolve_value v1 env, resolve_value v2 env with
+        match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
         | INT 0, INT _ -> processor rest (ERROR :: restStack) stack_stack env env_stack
         | INT a, INT b -> processor rest (INT (b / a) :: restStack) stack_stack env env_stack
         | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
         ) 
 
         | REM :: rest, v1 :: v2 :: restStack -> (
-            match resolve_value v1 env, resolve_value v2 env with
+            match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
         | INT 0, INT _ -> processor rest (ERROR :: restStack) stack_stack env env_stack
         | INT a, INT b -> processor rest (INT (b mod a) :: restStack) stack_stack env env_stack
         | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
@@ -163,9 +168,9 @@ let interpreter (input, output) : unit =
         | (SWAP :: rest, v1 :: v2 :: restStack) -> processor rest (v2 :: v1 :: restStack) stack_stack env env_stack
 
         | NEG :: rest, v1 :: restStack -> (
-            match resolve_value v1 env with
+            match resolve_value v1 (env::env_stack) with
         | INT n -> processor rest (INT (-n) :: restStack) stack_stack env env_stack
-        | n -> processor rest (ERROR :: n :: restStack) stack_stack env env_stack
+        | _ -> processor rest (ERROR :: v1 :: restStack) stack_stack env env_stack
 
         ) 
         | (POP :: rest, _ :: restStack) -> processor rest restStack stack_stack env env_stack
@@ -174,43 +179,43 @@ let interpreter (input, output) : unit =
 
 
         | CAT :: rest, v1 :: v2 :: restStack -> (
-            match resolve_value v1 env, resolve_value v2 env with
+            match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
             | STRING a ,STRING b -> processor rest (STRING (b ^ a) :: restStack) stack_stack env env_stack
             | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
           )
 
         | AND :: rest, v1 :: v2 :: restStack -> (
-        match resolve_value v1 env, resolve_value v2 env with
+        match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
         | BOOL a , BOOL b -> processor rest (BOOL (b && a) :: restStack) stack_stack env env_stack
         | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
         )
 
         | OR :: rest, v1 :: v2 :: restStack -> (
-        match resolve_value v1 env, resolve_value v2 env with
+        match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
         | BOOL a , BOOL b -> processor rest (BOOL (b || a) :: restStack) stack_stack env env_stack
         | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
         )
 
         | NOT :: rest, v1 :: restStack -> (
-            match resolve_value v1 env with
+            match resolve_value v1 (env::env_stack) with
             | BOOL a -> processor rest (BOOL (not a) :: restStack) stack_stack env env_stack
             | _ -> processor rest (ERROR :: v1 :: restStack) stack_stack env env_stack
             )
 
         | EQUAL :: rest, v1 :: v2 :: restStack -> (
-            match resolve_value v1 env, resolve_value v2 env with
+            match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
             | INT a, INT b -> processor rest (BOOL (a = b) :: restStack) stack_stack env env_stack
             | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
             )
 
         | LESSTHAN :: rest, v1 :: v2 :: restStack -> (
-            match resolve_value v1 env, resolve_value v2 env with
+            match resolve_value v1 (env::env_stack), resolve_value v2 (env::env_stack) with
             | INT a, INT b -> processor rest (BOOL (b < a) :: restStack) stack_stack env env_stack
             | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
             )
 
         | IF :: rest, a :: b :: c :: restStack -> (
-            match resolve_value a env, resolve_value b env, resolve_value c env with
+            match a ,  b , resolve_value c (env::env_stack) with
             | a , b , BOOL c ->  if c then
                 processor rest (a :: restStack) stack_stack env env_stack
             else
@@ -218,24 +223,39 @@ let interpreter (input, output) : unit =
             | _ -> processor rest (ERROR :: a :: b :: c :: restStack) stack_stack env env_stack
             )
         | (DEBUG :: rest, restStack) -> 
-            print_stack restStack; 
-            print_env env;      
-            processor rest stack stack_stack env env_stack
-        | (BIND :: rest, a :: NAME b :: restStack) -> 
-            (match a with
-            | NAME x -> (match (List.assoc_opt x env) with
-                         | Some z -> processor rest (UNIT :: restStack) stack_stack ((b, a) :: env) env_stack
-                         | None -> processor rest (ERROR :: a :: NAME b :: restStack) stack_stack env env_stack)
-            | _ ->  processor rest (UNIT :: restStack) ((b, a) :: env) stack_stack env_stack)
-        | LET :: rest, stack -> processor rest [] (stack :: stack_stack) [] (env :: env_stack)
-        | END :: rest, v :: _ -> (
-            match (stack_stack, env_stack) with
-            | prev_stack :: ss_tail, prev_env :: es_tail ->
-                processor rest (v :: prev_stack) ss_tail prev_env es_tail
-            | _ -> processor rest (ERROR :: stack) stack_stack env env_stack)
+            print_stack restStack;
+    
+    (* Print each environment in the env_stack *)
+    let rec print_all_envs i = function
+      | [] -> ()
+      | env :: rest ->
+          Printf.printf "Environment level %d:\n" i;
+          List.iter (fun (name, value) ->
+            Printf.printf "  %s -> %s\n" name (sv2str value)
+          ) env;
+          print_endline "----------------";
+          print_all_envs (i + 1) rest
+    in
 
-        | (_ :: rest, _) -> processor rest (ERROR :: stack) stack_stack env env_stack
-        | ([], _) -> stack 
+    print_all_envs 0 (env :: env_stack);
+
+    processor rest restStack stack_stack env env_stack
+    | (BIND :: rest, a :: NAME b :: restStack) -> (
+        (*print_endline (sv2str (resolve_value a (env::env_stack)));*)
+        let resolved = resolve_value a (env::env_stack) in
+        match resolved with
+        | ERROR -> processor rest (ERROR :: a :: NAME b :: restStack) stack_stack env env_stack
+        | _ ->  processor rest (UNIT :: restStack) stack_stack ((b, resolved) :: env) env_stack
+        )
+    | LET :: rest, stack -> processor rest [] (stack :: stack_stack) [] (env :: env_stack)
+    | END :: rest, v :: _ -> (
+        match (stack_stack, env_stack) with
+        | last_stack :: ss_tail, last_env :: es_tail ->
+            processor rest (v :: last_stack) ss_tail last_env es_tail
+        | _ -> processor rest (ERROR :: stack) stack_stack env env_stack)
+
+    | (_ :: rest, _) -> processor rest (ERROR :: stack) stack_stack env env_stack
+    | ([], _) -> stack 
     in
     
     let commands = convert_strings_to_commands strList in
@@ -245,4 +265,4 @@ let interpreter (input, output) : unit =
 ;;
 
 
-interpreter ("input1.txt", "output.txt")
+(*interpreter ("input1.txt", "output.txt")*)
