@@ -1,7 +1,8 @@
 type stackValue = BOOL of bool | INT of int | ERROR | STRING of string | NAME of string | UNIT
 
 type command = ADD | SUB | MUL | DIV | PUSH of stackValue | PRINTLN | SWAP | NEG | POP | TOSTRING | DEBUG | REM | CAT
-| AND | OR | NOT | EQUAL | LESSTHAN | IF | BIND
+| AND | OR | NOT | EQUAL | LESSTHAN | IF | BIND | LET | END
+
 
 let interpreter (input, output) : unit =
     let ic = open_in input in
@@ -28,7 +29,9 @@ let interpreter (input, output) : unit =
     
     let str2sv s =
         let is_int s = try ignore (int_of_string s); true with Failure _ -> false in
+        let is_float s = try ignore (float_of_string s); true with Failure _ -> false in
         if is_int s then INT (int_of_string s)
+        else if is_float s then ERROR
         else if s = ":true:" then BOOL true
         else if s = ":false:" then BOOL false
         else if s = ":error:" then ERROR
@@ -36,6 +39,7 @@ let interpreter (input, output) : unit =
         else if String.length s > 1 && s.[0] = '"' && s.[String.length s - 1] = '"' then
             STRING (String.sub s 1 (String.length s - 2))
         else NAME s
+        
     in
     
     let str2com s =
@@ -61,6 +65,10 @@ let interpreter (input, output) : unit =
         | "if", None -> Some IF
         | "not", None -> Some NOT
         | "bind", None -> Some BIND
+        | "let", None -> Some LET
+        | "end", None -> Some END
+
+
     
         | _ -> None
     in
@@ -102,56 +110,136 @@ let interpreter (input, output) : unit =
         List.iter print_binding env;
         print_endline "----------------"
     in
+
+    let resolve_value v env =
+        match v with
+        | NAME n -> (
+            match List.assoc_opt n env with 
+            | Some value -> value 
+            | None -> ERROR)
+        
+        | _ -> v
+    in 
     
     
-    let rec processor cl stack env =
+    let rec processor cl stack stack_stack env env_stack=
     
-        match (cl, stack) with
-        | (ADD :: rest, INT a :: INT b :: restStack) -> processor rest  (INT (a + b)::restStack) env
-        | (SUB :: rest, INT a :: INT b :: restStack) -> processor rest (INT (b - a) :: restStack) env
-        | (MUL :: rest, INT a :: INT b :: restStack) -> processor rest (INT (a * b) :: restStack) env
-        | (DIV :: rest, INT 0 :: INT _ :: restStack) -> processor rest (ERROR :: stack)  env
-        | (DIV :: rest, INT a :: INT b :: restStack) -> processor rest (INT (b / a) :: restStack) env
-        | (REM :: rest, INT 0 :: INT _ :: restStack) -> processor rest (ERROR :: stack) env
-        | (REM :: rest, INT a :: INT b :: restStack) -> processor rest (INT (b mod a) :: restStack) env
-        | (PUSH v :: rest, _) -> processor rest (v :: stack) env
+        match (cl, stack) with  
+        | (PUSH v :: rest, _) -> processor rest (v :: stack) stack_stack env env_stack
+        | (ADD :: rest, v1 :: v2 :: restStack) -> (
+            match (resolve_value v1 env, resolve_value v2 env) with
+            | INT a, INT b -> processor rest (INT (a + b) :: restStack) stack_stack env  env_stack
+            | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+          )        
+        | (SUB :: rest, v1 :: v2 :: restStack) -> (
+            match resolve_value v1 env, resolve_value v2 env with
+            | INT a, INT b -> processor rest (INT (b - a) :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack)
+    
+        | MUL :: rest, v1 :: v2 :: restStack -> (
+            match resolve_value v1 env, resolve_value v2 env with
+            | INT a, INT b -> processor rest (INT (a * b) :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+          )
+
+
+        | DIV :: rest, v1 :: v2 :: restStack -> (
+        match resolve_value v1 env, resolve_value v2 env with
+        | INT 0, INT _ -> processor rest (ERROR :: restStack) stack_stack env env_stack
+        | INT a, INT b -> processor rest (INT (b / a) :: restStack) stack_stack env env_stack
+        | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+        ) 
+
+        | REM :: rest, v1 :: v2 :: restStack -> (
+            match resolve_value v1 env, resolve_value v2 env with
+        | INT 0, INT _ -> processor rest (ERROR :: restStack) stack_stack env env_stack
+        | INT a, INT b -> processor rest (INT (b mod a) :: restStack) stack_stack env env_stack
+        | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+        ) 
+
         | (PRINTLN :: rest, v :: restStack) ->
             file_write oc (sv2str v);
-            processor rest restStack  env
-        | (SWAP :: rest, v1 :: v2 :: restStack) -> processor rest (v2 :: v1 :: restStack) env
-        | (NEG :: rest, INT n :: restStack) -> processor rest (INT (-n) :: restStack) env
-        | (NEG :: rest, n :: restStack) -> processor rest (ERROR :: n :: restStack) env
-        | (POP :: rest, _ :: restStack) -> processor rest restStack env
-        | (TOSTRING :: rest, v :: restStack) -> processor rest (STRING (sv2str v) :: restStack) env
-        | (TOSTRING :: rest, []) -> processor rest (ERROR :: stack) env
-        | (CAT :: rest, STRING a :: STRING b :: restStack) -> processor rest (STRING (b ^ a) :: restStack) env
-        | (AND :: rest, BOOL a :: BOOL b :: restStack) -> processor rest (BOOL (b && a) :: restStack) env
-        | (OR :: rest, BOOL a :: BOOL b :: restStack) -> processor rest (BOOL (b || a) :: restStack) env
-        | (NOT :: rest, BOOL a :: restStack) -> processor rest (BOOL (not a) :: restStack) env
-        | (EQUAL :: rest, INT a :: INT b :: restStack) -> processor rest (BOOL (a = b) :: restStack) env
-        | (LESSTHAN :: rest, INT a :: INT b :: restStack) -> processor rest (BOOL (b < a) :: restStack) env
-        | (IF :: rest, a :: b :: BOOL c :: restStack) -> 
-            if c then
-                processor rest (a :: stack) env
+            processor rest restStack stack_stack env env_stack
+        | (SWAP :: rest, v1 :: v2 :: restStack) -> processor rest (v2 :: v1 :: restStack) stack_stack env env_stack
+
+        | NEG :: rest, v1 :: restStack -> (
+            match resolve_value v1 env with
+        | INT n -> processor rest (INT (-n) :: restStack) stack_stack env env_stack
+        | n -> processor rest (ERROR :: n :: restStack) stack_stack env env_stack
+
+        ) 
+        | (POP :: rest, _ :: restStack) -> processor rest restStack stack_stack env env_stack
+        | (TOSTRING :: rest, v :: restStack) -> processor rest (STRING (sv2str v) :: restStack) stack_stack env env_stack
+        | (TOSTRING :: rest, []) -> processor rest (ERROR :: stack) stack_stack env env_stack
+
+
+        | CAT :: rest, v1 :: v2 :: restStack -> (
+            match resolve_value v1 env, resolve_value v2 env with
+            | STRING a ,STRING b -> processor rest (STRING (b ^ a) :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+          )
+
+        | AND :: rest, v1 :: v2 :: restStack -> (
+        match resolve_value v1 env, resolve_value v2 env with
+        | BOOL a , BOOL b -> processor rest (BOOL (b && a) :: restStack) stack_stack env env_stack
+        | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+        )
+
+        | OR :: rest, v1 :: v2 :: restStack -> (
+        match resolve_value v1 env, resolve_value v2 env with
+        | BOOL a , BOOL b -> processor rest (BOOL (b || a) :: restStack) stack_stack env env_stack
+        | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+        )
+
+        | NOT :: rest, v1 :: restStack -> (
+            match resolve_value v1 env with
+            | BOOL a -> processor rest (BOOL (not a) :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: v1 :: restStack) stack_stack env env_stack
+            )
+
+        | EQUAL :: rest, v1 :: v2 :: restStack -> (
+            match resolve_value v1 env, resolve_value v2 env with
+            | INT a, INT b -> processor rest (BOOL (a = b) :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+            )
+
+        | LESSTHAN :: rest, v1 :: v2 :: restStack -> (
+            match resolve_value v1 env, resolve_value v2 env with
+            | INT a, INT b -> processor rest (BOOL (b < a) :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: v1 :: v2 :: restStack) stack_stack env env_stack
+            )
+
+        | IF :: rest, a :: b :: c :: restStack -> (
+            match resolve_value a env, resolve_value b env, resolve_value c env with
+            | a , b , BOOL c ->  if c then
+                processor rest (a :: restStack) stack_stack env env_stack
             else
-                processor rest (b :: stack) env
-        | (DEBUG :: rest, stack) -> 
-            print_stack stack;  (* Print the entire stack *)
+                processor rest (b :: restStack) stack_stack env env_stack
+            | _ -> processor rest (ERROR :: a :: b :: c :: restStack) stack_stack env env_stack
+            )
+        | (DEBUG :: rest, restStack) -> 
+            print_stack restStack; 
             print_env env;      
-            processor rest stack env
+            processor rest stack stack_stack env env_stack
         | (BIND :: rest, a :: NAME b :: restStack) -> 
             (match a with
             | NAME x -> (match (List.assoc_opt x env) with
-                         | Some z -> processor rest (UNIT :: restStack) ((b, a) :: env)
-                         | None -> processor rest (ERROR :: a :: NAME b :: restStack) env)
-            | _ ->  processor rest (UNIT :: restStack) ((b, a) :: env))
-        | (_ :: rest, _) -> processor rest (ERROR :: stack) env
+                         | Some z -> processor rest (UNIT :: restStack) stack_stack ((b, a) :: env) env_stack
+                         | None -> processor rest (ERROR :: a :: NAME b :: restStack) stack_stack env env_stack)
+            | _ ->  processor rest (UNIT :: restStack) ((b, a) :: env) stack_stack env_stack)
+        | LET :: rest, stack -> processor rest [] (stack :: stack_stack) [] (env :: env_stack)
+        | END :: rest, v :: _ -> (
+            match (stack_stack, env_stack) with
+            | prev_stack :: ss_tail, prev_env :: es_tail ->
+                processor rest (v :: prev_stack) ss_tail prev_env es_tail
+            | _ -> processor rest (ERROR :: stack) stack_stack env env_stack)
 
+        | (_ :: rest, _) -> processor rest (ERROR :: stack) stack_stack env env_stack
         | ([], _) -> stack 
     in
     
     let commands = convert_strings_to_commands strList in
-    let _ = processor commands [] [] in
+    let _ = processor commands [] [] [] [] in
 
     close_out oc
 ;;
