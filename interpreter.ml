@@ -265,4 +265,4 @@ let interpreter (input, output) : unit =
 ;;
 
 
-(*interpreter ("input1.txt", "output.txt")*)
+interpreter ("input1.txt", "output.txt")
